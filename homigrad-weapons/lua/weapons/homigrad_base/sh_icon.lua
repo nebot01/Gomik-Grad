@@ -1,0 +1,10 @@
+-- "addons\\homigrad-weapons\\lua\\weapons\\homigrad_base\\sh_icon.lua"
+-- Retrieved by https://github.com/lewisclark/glua-steal
+SWEP.IconPos = Vector(0,0,0)
+SWEP.IconAng = Angle(0,0,0)
+SWEP.WepSelectIcon2 = Material("null")
+SWEP.IconOverride = ""
+
+function SWEP:DrawWeaponSelection( x, y, wide, tall, alpha )
+    hg.DrawWeaponSelection(self,x,y,wide,tall,alpha)
+end

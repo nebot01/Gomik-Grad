@@ -1,0 +1,313 @@
+local open = false
+local panelka
+local open_anim = 0
+
+-- Ссылки на фрукты
+local img_banana = "https://github.com/bebebe3/papochka-ahh/blob/main/banani.png?raw=true"
+local img_strawberry = "https://github.com/bebebe3/papochka-ahh/blob/main/klybnika.png?raw=true"
+local img_plum = "https://github.com/bebebe3/papochka-ahh/blob/main/sliva.png?raw=true"
+local img_pasbalka = "https://github.com/bebebe3/papochka-ahh/blob/main/cazino.png?raw=true"
+
+-- Логика: 1 = Слива, 2 = Банан, 3 = Клубника
+local fruit_map = {
+    [1] = img_plum,
+    [2] = img_banana,
+    [3] = img_strawberry
+}
+
+-- Получение поинтов
+local function GetcasinoBalance()
+    return LocalPlayer():GetNWInt("HG_Points", 0)
+end
+
+local currentBet = 50
+local isSpinning = false
+local winMessage = ""
+local winColor = Color(255, 255, 255)
+
+-- Данные для анимации слотов
+local slotData = {
+    {y = 0, speed = 0, stopTime = 0, result = 3, bounce = 0},
+    {y = 0, speed = 0, stopTime = 0, result = 3, bounce = 0},
+    {y = 0, speed = 0, stopTime = 0, result = 3, bounce = 0}
+}
+local TILE_SIZE = 100 -- Высота одного фрукта
+
+-- Функция старта анимации
+local function StartSpinAnimation()
+    isSpinning = true
+    winMessage = ""
+    local timeNow = CurTime()
+    
+    for i = 1, 3 do
+        slotData[i].speed = 1500 + (i * 200) -- Скорость
+        slotData[i].stopTime = timeNow + 2 + (i * 0.5) -- Время остановки (каскадом)
+        slotData[i].y = 0
+        slotData[i].bounce = 0
+    end
+end
+
+-- Функция обновления UI после ответа сервера
+net.Receive("HG_Casino_Spin", function() -- Имя сетевой строки должно совпадать с серверной!
+    local s1 = net.ReadUInt(4)
+    local s2 = net.ReadUInt(4)
+    local s3 = net.ReadUInt(4)
+    local winAmt = net.ReadUInt(32)
+    local winType = net.ReadUInt(4)
+
+    -- Сохраняем результаты для остановки
+    slotData[1].result = s1
+    slotData[2].result = s2
+    slotData[3].result = s3
+
+    -- Ждем окончания анимации последнего слота
+    timer.Simple(4, function()
+        if not IsValid(panelka) then return end
+        isSpinning = false
+        
+        if winAmt > 0 then
+            if winType == 3 then
+                winMessage = "КЛУБНИЧКА! x5 (+" .. winAmt .. ")"
+                winColor = Color(255, 50, 50)
+            elseif winType == 2 then
+                winMessage = "БАНАНЫ! x3 (+" .. winAmt .. ")"
+                winColor = Color(255, 255, 100)
+            elseif winType == 1 then
+                winMessage = "СЛИВЫ! x2 (+" .. winAmt .. ")"
+                winColor = Color(100, 100, 255)
+            end
+            surface.PlaySound("homigrad/vgui/menu_accept.wav")
+        else
+            winMessage = "Проигрыш"
+            winColor = Color(150, 150, 150)
+            surface.PlaySound("buttons/button16.wav")
+        end
+    end)
+end)
+
+hook.Add("HUDPaint", "casino_Page_Logic", function()
+    if not hg.ScoreBoard then return end
+    if not IsValid(ScoreBoardPanel) then 
+        open = false 
+        open_anim = 0
+        if IsValid(panelka) then panelka:Remove() end
+        return 
+    end
+
+    if hg.ScoreBoard == 10 and not hg.score_closing then
+        open_anim = Lerp(FrameTime() * 10, open_anim, 1)
+    else
+        open_anim = Lerp(FrameTime() * 10, open_anim, 0)
+    end
+
+    if hg.ScoreBoard ~= 10 and open then
+        open = false
+        if IsValid(panelka) then panelka:Remove() end
+        return
+    end
+
+    if hg.ScoreBoard == 10 and not open then
+        open = true
+        
+        local MainPanel = vgui.Create("DFrame", ScoreBoardPanel)
+        MainPanel:SetSize(ScrW(), ScrH())
+        MainPanel:Center()
+        MainPanel:SetDraggable(false)
+        MainPanel:SetTitle(" ")
+        MainPanel:ShowCloseButton(false)
+        
+        local cx = MainPanel:GetX()
+        MainPanel.Paint = function(s, w, h)
+            local targetX = (1 - open_anim) * (ScrW()/1.5)
+            s:SetX(targetX)
+        end
+
+        local Content = vgui.Create("DPanel", MainPanel)
+        Content:SetSize(600, 500)
+        Content:Center()
+        Content.Paint = function(s, w, h)
+            draw.RoundedBox(8, 0, 0, w, h, Color(30, 30, 30, 240))
+            draw.RoundedBox(8, 2, 2, w-4, h-4, Color(50, 50, 50, 100))
+            
+            if hg.GetURLMaterial then
+                local eggMat = hg.GetURLMaterial(img_pasbalka, "casino_egg")
+                if eggMat then
+                    surface.SetDrawColor(255, 255, 255, 255)
+                    surface.SetMaterial(eggMat)
+                    surface.DrawTexturedRect(w - 110, h - 110, 100, 100)
+                end
+            end
+
+            draw.SimpleText("МЕЛЛ КАЗИК", "hg_HomicideSmalles", w/2, 30, Color(255, 215, 0), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            draw.SimpleText("Баланс: " .. GetcasinoBalance() .. " pts", "hg_HomicideSmalles", w/2, 70, Color(100, 255, 100), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            draw.SimpleText("Ставка: " .. currentBet, "hg_HomicideSmalles", w/2, 360, Color(255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            
+            if winMessage ~= "" then
+                draw.SimpleText(winMessage, "hg_HomicideSmalles", w/2, 110, winColor, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            end
+        end
+
+        -- СЛОТЫ (Анимация)
+        for i = 1, 3 do
+            local pnl = vgui.Create("DPanel", Content)
+            pnl:SetSize(100, 100)
+            pnl:SetPos(150 + (i-1)*110, 150)
+            
+            -- Маска (чтобы фрукты не вылезали за рамки)
+            pnl.Paint = function(s, w, h)
+                draw.RoundedBox(4, 0, 0, w, h, Color(0, 0, 0, 200))
+                draw.RoundedBox(4, 2, 2, w-4, h-4, Color(20, 20, 20, 255))
+                
+                -- Логика движения
+                local data = slotData[i]
+                if isSpinning and CurTime() < data.stopTime then
+                    data.y = data.y + data.speed * FrameTime()
+                    if data.y >= TILE_SIZE * 3 then data.y = 0 end -- Зацикливание
+                    
+                    -- Звук тика
+                    if not data.lastTick or (data.y > TILE_SIZE and data.lastTick < TILE_SIZE) then
+                        if i == 1 then -- Чтобы не было каши, звук только от первого
+                            surface.PlaySound("homigrad/vgui/csgo_ui_crate_item_scroll.wav")
+                        end
+                        data.lastTick = 0
+                    end
+                    data.lastTick = data.y
+
+                elseif isSpinning and CurTime() >= data.stopTime then
+                    -- Эффект пружины при остановке
+                    -- Целевая позиция: Результат должен быть по центру
+                    -- Мы рисуем ленту так: [Result-1] [Result] [Result+1]
+                    -- Центр это смещение 0.
+                    
+                    if data.bounce == 0 then
+                        data.bounce = 1
+                        surface.PlaySound("homigrad/vgui/csgo_ui_contract_type2.wav") -- Звук остановки
+                    end
+                    
+                    -- Плавное затухание скорости к нулю (пружинка)
+                    -- Здесь просто ставим в центр для простоты, т.к. сложные пружины требуют много кода
+                    data.y = 0 
+                end
+
+                -- Отрисовка "Ленты"
+                -- Рисуем 3 фрукта: Предыдущий, Текущий (Результат), Следующий
+                -- Смещение Y позволяет создать иллюзию движения
+                
+                local currentRes = data.result
+                local prevRes = currentRes - 1; if prevRes < 1 then prevRes = 3 end
+                local nextRes = currentRes + 1; if nextRes > 3 then nextRes = 1 end
+                
+                -- Если крутимся, показываем рандом для размытия, если остановились - результат
+                local renderList = {prevRes, currentRes, nextRes}
+                if isSpinning and CurTime() < data.stopTime then
+                    renderList = {math.random(1,3), math.random(1,3), math.random(1,3)}
+                end
+
+                -- Отрисовка с учетом смещения data.y
+                local yOffset = (data.y % TILE_SIZE) 
+                
+                -- Рисуем с ScissorRect (чтобы обрезать края)
+                local sx, sy = s:LocalToScreen(0, 0)
+                render.SetScissorRect(sx+2, sy+2, sx+w-2, sy+h-2, true)
+                
+                for k, fruitIdx in ipairs(renderList) do
+                    local fruitUrl = fruit_map[fruitIdx]
+                    if fruitUrl and hg.GetURLMaterial then
+                        local mat = hg.GetURLMaterial(fruitUrl, "casino_fruit_"..fruitIdx)
+                        if mat then
+                            surface.SetDrawColor(255, 255, 255, 255)
+                            surface.SetMaterial(mat)
+                            -- Позиция: Центр + смещение. 
+                            -- k=1 (верх), k=2 (центр), k=3 (низ)
+                            -- Двигаем все вниз на yOffset
+                            local drawY = (k-2) * TILE_SIZE + yOffset
+                            surface.DrawTexturedRect(5, drawY + 5, w-10, h-10)
+                        end
+                    end
+                end
+                
+                render.SetScissorRect(0, 0, 0, 0, false)
+            end
+        end
+
+        -- Кнопки
+        local SpinBtn = vgui.Create("DButton", Content)
+        SpinBtn:SetText("КРУТИТЬ")
+        SpinBtn:SetFont("hg_HomicideSmalles")
+        SpinBtn:SetSize(200, 50)
+        SpinBtn:SetPos(200, 420)
+        SpinBtn:SetTextColor(Color(255, 255, 255))
+        SpinBtn.Paint = function(s, w, h)
+            local col = s:IsHovered() and Color(60, 160, 60) or Color(40, 140, 40)
+            if isSpinning then col = Color(50, 50, 50) end
+            draw.RoundedBox(4, 0, 0, w, h, col)
+        end
+        
+        SpinBtn.DoClick = function()
+            if isSpinning then return end
+            
+            local bal = GetcasinoBalance()
+            if bal < currentBet then
+                winMessage = "Недостаточно средств!"
+                winColor = Color(255, 50, 50)
+                surface.PlaySound("buttons/button10.wav")
+                return
+            end
+
+            StartSpinAnimation() -- Запуск анимации
+            surface.PlaySound("buttons/lever7.wav")
+            
+            net.Start("HG_Casino_Spin") -- Имя сетевой строки (должно совпадать с сервером!)
+            net.WriteUInt(currentBet, 32)
+            net.SendToServer()
+        end
+
+        -- Остальные кнопки управления ставкой (без изменений)
+        local MinusBtn = vgui.Create("DButton", Content)
+        MinusBtn:SetText("-")
+        MinusBtn:SetFont("hg_HomicideSmalles")
+        MinusBtn:SetSize(40, 40)
+        MinusBtn:SetPos(150, 340)
+        MinusBtn:SetTextColor(Color(255,255,255))
+        MinusBtn.Paint = function(s, w, h) draw.RoundedBox(4,0,0,w,h,Color(60,60,60)) end
+        MinusBtn.DoClick = function()
+            if currentBet > 10 then 
+                currentBet = currentBet - 10 
+                surface.PlaySound("homigrad/vgui/panorama/sidemenu_click_01.wav")
+            end
+        end
+
+        local PlusBtn = vgui.Create("DButton", Content)
+        PlusBtn:SetText("+")
+        PlusBtn:SetFont("hg_HomicideSmalles")
+        PlusBtn:SetSize(40, 40)
+        PlusBtn:SetPos(410, 340)
+        PlusBtn:SetTextColor(Color(255,255,255))
+        PlusBtn.Paint = function(s, w, h) draw.RoundedBox(4,0,0,w,h,Color(60,60,60)) end
+        PlusBtn.DoClick = function()
+            if currentBet < GetcasinoBalance() then 
+                currentBet = currentBet + 10 
+                surface.PlaySound("homigrad/vgui/panorama/sidemenu_click_01.wav")
+            end
+        end
+        
+        local MaxBtn = vgui.Create("DButton", Content)
+        MaxBtn:SetText("MAX")
+        MaxBtn:SetSize(60, 20)
+        MaxBtn:SetPos(270, 390)
+        MaxBtn:SetTextColor(Color(255,255,255))
+        MaxBtn.Paint = function(s, w, h) draw.RoundedBox(4,0,0,w,h,Color(100,60,60)) end
+        MaxBtn.DoClick = function()
+            local bal = GetcasinoBalance()
+            if bal > 0 then
+                currentBet = math.floor(bal / 10) * 10
+                if currentBet == 0 then currentBet = 10 end
+            else
+                currentBet = 10
+            end
+            surface.PlaySound("homigrad/vgui/panorama/sidemenu_click_01.wav")
+        end
+
+        panelka = MainPanel
+    end
+end)

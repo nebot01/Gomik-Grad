@@ -1,0 +1,7 @@
+"homigrad_com"
+{
+	"base"		"sandbox"
+	"title"		"Gomigrad Com"
+	"maps"		""
+	"menusystem"	"1"
+}

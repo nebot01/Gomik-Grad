@@ -1,0 +1,3 @@
+-- "addons\\homigrad-core\\lua\\homigrad\\organism\\gib\\init_cl.lua"
+-- Retrieved by https://github.com/lewisclark/glua-steal
+--

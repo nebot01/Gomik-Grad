@@ -1,0 +1,551 @@
+-- "addons\\homigrad-weapons\\lua\\weapons\\homigrad_base\\sh_worldmodel.lua"
+-- Retrieved by https://github.com/lewisclark/glua-steal
+SWEP.WorldAng = Angle(0,0,0)
+SWEP.WorldPos = Vector(0,0,0)
+
+SWEP.HolsterAng = Angle(0,0,0)
+SWEP.HolsterPos = Vector(0,0,0)
+SWEP.HolsterBone = "ValveBiped.Bip01_Pelvis"
+
+//SWEP.LHandAng = Angle(0,0,0)
+//SWEP.LHand = Vector(0,0,0)
+//SWEP.RHandAng = Angle(0,0,0)
+//SWEP.RHand = Vector(0,0,0)
+
+SWEP.ClosePos = 0
+SWEP.Isclose = false    
+
+SWEP.DetailsDraw = {}
+
+SWEP.Bodygroups = {}
+
+local suicide_pist_ang = Angle(120,20,90)
+local suicide_pist_pos = Vector(-27,-2,0.5)
+
+local suicide_rifle_ang = Angle(100,10,90)
+local suicide_rifle_pos = Vector(-34,-1,1.5)
+
+SWEP.speed = 0
+
+SWEP.vmshake = true // навсякий пусть будет, если хуйня будет то вырубите
+SWEP.vmshakeBone = "ValveBiped.Bip01_R_UpperArm" 
+SWEP.vmshakeBaseBone = 0 
+SWEP.vmshakeMultiplier = 0.012 //заработал нарулил ачё
+
+local vmShake_oldAng = Angle(0, 0, 0)
+local vmShake_oldBoneName = ""
+
+function SWEP:Applyvmshake()
+    if not self.vmshake then return end
+    if not IsValid(self) then return end
+    
+    if not self.reload then return end
+    
+    local model = self.worldModel
+    if not IsValid(model) then return end
+    
+    model:SetupBones()
+    
+    local boneName = self.vmshakeBone or "ValveBiped.Bip01_R_UpperArm"
+    
+    if boneName ~= vmShake_oldBoneName then
+        vmShake_oldAng = Angle(0, 0, 0)
+        vmShake_oldBoneName = boneName
+    end
+    
+    local boneID = isnumber(boneName) and boneName or model:LookupBone(boneName)
+    
+    if not boneID then return end
+    
+    local baseBoneName = self.vmshakeBaseBone
+    local baseBoneID = 0
+    if isstring(baseBoneName) and baseBoneName ~= "" then
+        baseBoneID = model:LookupBone(baseBoneName)
+    end
+    
+    local boneMatrix = model:GetBoneMatrix(boneID)
+    if not boneMatrix then return end
+    
+    local currentAng = boneMatrix:GetAngles()
+    
+    local baseAng = Angle(0, 0, 0)
+    if baseBoneID and baseBoneID >= 0 then
+        local baseMatrix = model:GetBoneMatrix(baseBoneID)
+        if baseMatrix then
+            baseAng = baseMatrix:GetAngles()
+        end
+    end
+    
+    local angDiff = Angle(0, 0, 0)
+    angDiff.p = math.AngleDifference(currentAng.p, baseAng.p)
+    angDiff.y = math.AngleDifference(currentAng.y, baseAng.y)
+    angDiff.r = math.AngleDifference(currentAng.r, baseAng.r)
+    
+    local delta = Angle(0, 0, 0)
+    delta.p = angDiff.p - vmShake_oldAng.p
+    delta.y = angDiff.y - vmShake_oldAng.y
+    delta.r = angDiff.r - vmShake_oldAng.r
+    
+    vmShake_oldAng = Angle(angDiff.p, angDiff.y, angDiff.r)
+    
+    local multiplier = self.ReloadShake or self.vmshakeMultiplier or 0.015
+    local punch = Angle(delta.p, delta.y, delta.r) * multiplier
+    
+    if math.abs(punch.p) > 0.01 or math.abs(punch.y) > 0.01 or math.abs(punch.r) > 0.01 then
+        ViewPunch(punch)
+        ViewPunch2(punch * 0.5)
+    end
+end
+
+-- Weapon shake variables а вот и гпткод!
+local wep_shake_pitch = 0
+local wep_shake_yaw = 0
+local wep_shake_roll = 0
+local wep_shake_pos_x = 0
+local wep_shake_pos_y = 0
+local wep_shake_pos_z = 0
+
+function SWEP:WorldModel_Transform(nomod)
+    local ply = self:GetOwner()
+
+    if ply:GetNWBool("otrub") /*or !self.Deployed*/ then
+        local pos,ang = self:WorldModel_Holster_Transform()
+        return pos,ang
+    end
+
+    //if IsValid(self.worldModel) and ply:GetActiveWeapon() != self then 
+    //    return self:WorldModel_Holster_Transform()
+    //end
+
+    if IsValid(self.worldModel) and ply:GetActiveWeapon() == self then
+        self.worldModel:SetNoDraw(false)
+        self.worldModel.NoRender = false
+
+        if CLIENT then
+            if self.Bodygroups then
+	            for k, v in ipairs(self.Bodygroups) do
+	                self.worldModel:SetBodygroup(k, v)
+	            end
+	        end
+
+            if self.Skin then
+                self.worldModel:SetSkin(self.Skin)
+            end
+        end
+    end
+
+    if !IsValid(ply) then
+        return
+    end
+
+    local ent = hg.GetCurrentCharacter(ply)
+
+    local r_hand_index = (self.SupportTPIK and ply:LookupBone("ValveBiped.Bip01_Head1") or ply:LookupBone("ValveBiped.Bip01_R_Hand"))
+
+    if !IsValid(ent) then
+        return  
+    end
+
+    local mat = ent:GetBoneMatrix(r_hand_index)
+
+    if !mat then
+        return
+    end
+
+    local tr_shit = hg.eyeTrace(ply)
+
+    local Pos = ent:IsRagdoll() and mat:GetTranslation() or (tr_shit.StartPos + ply:EyeAngles():Right() * 0.5 + ply:EyeAngles():Up() * -2)// + (ply:EyeAngles().p > 0 and ply:EyeAngles():Up() * 5 or Vector())
+    local Ang = ply:EyeAngles()
+
+    local isclose = self.Isclose
+
+    local closepos = (isclose and Ang:Forward() * self.ClosePos or Vector(0,0,0))
+    
+    Pos = Pos - closepos
+
+    if CLIENT then
+        //print(ply.prev_wep_ang)
+        ply.prev_wep_ang = LerpAngleFT(0.015,ply.prev_wep_ang or self.DWorldAng,self.WorldAng)
+        ply.prev_wep_pos = LerpVectorFT(0.015,ply.prev_wep_pos or self.DWorldPos,self.WorldPos)
+    else
+        ply.prev_wep_ang = self.WorldAng
+        ply.prev_wep_pos = self.WorldPos
+    end
+
+    //if self.Deploye then
+        Ang:RotateAroundAxis(Ang:Right(),ply.prev_wep_ang[1])
+        Ang:RotateAroundAxis(Ang:Up(),ply.prev_wep_ang[2])
+        Ang:RotateAroundAxis(Ang:Forward(),ply.prev_wep_ang[3])
+    //end
+
+    if !ply:GetNWBool("suiciding") then
+        //ply.prev_wep_ang = LerpAngleFT((self:IsSighted() and 0.2 or 0.04),ply.prev_wep_ang,Ang)
+    else
+        Ang.p = 0
+        
+        local sangs = self:IsPistolHoldType() and suicide_pist_ang or suicide_rifle_ang
+        local spos = self:IsPistolHoldType() and suicide_pist_pos or suicide_rifle_pos
+
+        Ang:RotateAroundAxis(Ang:Right(),sangs[1])
+        Ang:RotateAroundAxis(Ang:Up(),sangs[2])
+        Ang:RotateAroundAxis(Ang:Forward(),sangs[3])
+
+        Pos = Pos + Ang:Forward() * spos[1]
+        Pos = Pos + Ang:Right() * spos[2]
+        Pos = Pos + Ang:Up() * spos[3]
+    end
+
+    if !ply:GetNWBool("suiciding") then
+        Pos = Pos + Ang:Forward() * ply.prev_wep_pos[1]
+        Pos = Pos + Ang:Right() * ply.prev_wep_pos[2]
+        Pos = Pos + Ang:Up() * ply.prev_wep_pos[3]
+    end
+
+    //self:DrawAttachments()
+
+    local model = self.worldModel
+
+    local final_ang = Ang
+    local final_pos = Pos
+
+    if IsValid(model) and !nomod then
+        model:SetPos(Pos)
+        model:SetAngles(Ang)
+        model:SetParent(ent)
+        local speed_pos = (self:IsPistolHoldType() or self:GetRunAnim()) and (vector_up * (6 * self.speed)) - Ang:Forward() * (-4 * self.speed) or (Ang:Forward() * 2 + Ang:Right() * -8 + Ang:Up() * 0) * self.speed
+        local speed_ang = (self:IsPistolHoldType() or self:GetRunAnim()) and Angle(30 * self.speed,0 * self.speed,0) or Angle(15,-55,30) * self.speed
+
+        //ply.prev_wep_ang[1] = ply.prev_wep_ang[1] * (1 - self.speed)
+
+               -- Weapon shake when sprinting or walking
+        local vel = IsValid(ply) and ply:GetVelocity():Length() or 0
+        local vel2d = 0
+        if IsValid(ply) then
+            local v = ply:GetVelocity()
+            vel2d = Vector(v.x, v.y, 0):Length()
+        end
+        local isSprinting = self.speed > 0.5
+        local hasMoveInput = IsValid(ply) and (ply:KeyDown(IN_FORWARD) or ply:KeyDown(IN_BACK) or ply:KeyDown(IN_MOVELEFT) or ply:KeyDown(IN_MOVERIGHT))
+        local isWalking = IsValid(ply) and ply:OnGround() and hasMoveInput and vel2d > 45 and vel2d < 2150
+
+        local isInRagdoll = IsValid(ply) and (ply.Fake or ply:GetMoveType() == MOVETYPE_NONE)
+        
+        if isInRagdoll then
+            wep_shake_pitch = LerpFT(0.1, wep_shake_pitch, 0)
+            wep_shake_yaw = LerpFT(0.1, wep_shake_yaw, 0)
+            wep_shake_roll = LerpFT(0.1, wep_shake_roll, 0)
+            wep_shake_pos_x = LerpFT(0.1, wep_shake_pos_x, 0)
+            wep_shake_pos_y = LerpFT(0.1, wep_shake_pos_y, 0)
+            wep_shake_pos_z = LerpFT(0.1, wep_shake_pos_z, 0)
+
+        elseif isSprinting then
+            wep_shake_pitch = LerpFT(0.1, wep_shake_pitch, -math.abs(math.sin(CurTime() * 10)) * (vel / 150))
+            wep_shake_yaw = LerpFT(0.1, wep_shake_yaw, math.sin(CurTime() * 9) * (vel / 180))
+            wep_shake_roll = LerpFT(0.1, wep_shake_roll, math.sin(CurTime() * 11) * (vel / 200))
+            wep_shake_pos_x = LerpFT(0.1, wep_shake_pos_x, math.sin(CurTime() * 8) * (vel / 250))
+            wep_shake_pos_y = LerpFT(0.1, wep_shake_pos_y, math.sin(CurTime() * 9) * (vel / 280))
+            wep_shake_pos_z = LerpFT(0.1, wep_shake_pos_z, math.abs(math.sin(CurTime() * 10)) * (vel / 300))
+
+        elseif isWalking then
+            wep_shake_pitch = LerpFT(0.1, wep_shake_pitch, -math.abs(math.sin(CurTime() * 9)) * (vel / 200))
+            wep_shake_yaw = LerpFT(0.1, wep_shake_yaw, math.sin(CurTime() * 8) * (vel / 250))
+            wep_shake_roll = LerpFT(0.1, wep_shake_roll, math.sin(CurTime() * 10) * (vel / 300))
+            wep_shake_pos_x = LerpFT(0.1, wep_shake_pos_x, math.sin(CurTime() * 7) * (vel / 350))
+            wep_shake_pos_y = LerpFT(0.1, wep_shake_pos_y, math.sin(CurTime() * 8) * (vel / 400))
+            wep_shake_pos_z = LerpFT(0.1, wep_shake_pos_z, math.abs(math.sin(CurTime() * 9)) * (vel / 450))
+            
+        else
+            wep_shake_pitch = LerpFT(0.1, wep_shake_pitch, 0)
+            wep_shake_yaw = LerpFT(0.1, wep_shake_yaw, 0)
+            wep_shake_roll = LerpFT(0.1, wep_shake_roll, 0)
+            wep_shake_pos_x = LerpFT(0.1, wep_shake_pos_x, 0)
+            wep_shake_pos_y = LerpFT(0.1, wep_shake_pos_y, 0)
+            wep_shake_pos_z = LerpFT(0.1, wep_shake_pos_z, 0)
+        end
+
+        Ang[1] = Ang[1] * (1 - self.speed)
+
+        local shake_pos_offset = Ang:Forward() * wep_shake_pos_x + Ang:Right() * wep_shake_pos_y + Ang:Up() * wep_shake_pos_z
+        local shake_ang_offset = Angle(wep_shake_pitch, wep_shake_yaw, wep_shake_roll)
+
+        model:SetRenderOrigin(((Pos - speed_pos) - vector_up * (8 * self.speed)) - Ang:Forward() * (vis_recoil / 2) - Ang:Right() * (self:IsLocal() and govno_recoil * Recoil or 0) + shake_pos_offset)
+        model:SetRenderAngles(Ang - speed_ang - Angle(2 * (self:IsLocal() and vis_recoil or 0)) - Angle(0,2 * (self:IsLocal() and govno_recoil * Recoil or 0),0) + shake_ang_offset)
+
+        final_ang = Ang - speed_ang + shake_ang_offset //- Angle(2 * (self:IsLocal() and vis_recoil or 0))
+        final_pos = (Pos - speed_pos) - vector_up * (8 * self.speed) + shake_pos_offset
+    end
+
+    if self.Details and CLIENT then
+        self:WorldModel_Details()
+    end
+
+    return final_pos,final_ang
+end
+
+function SWEP:WorldModel_Details()
+    for _, detail in ipairs(self.Details) do
+        if !IsValid(self.DetailsDraw[_]) then
+            self.DetailsDraw[_] = ClientsideModel(detail.Model)
+
+            self.DetailsDraw[_]:SetupBones(true)
+
+            //self:CallOnRemove("remove_det",function(
+            //    self.DetailsDraw[_]:Remove()
+            //    self.DetailsDraw[_] = nil
+            //end))
+
+            //hg.SetupModel(self,self.worldModel)
+        else
+            //hg.SetupModel(self,self.worldModel)
+
+            if !detail.Bone then
+                continue 
+            end
+
+            local id = self.worldModel:LookupBone(detail.Bone)
+
+            if !id then
+                continue 
+            end
+
+            local mat = self.worldModel:GetBoneMatrix(id)
+
+            if !mat then
+                continue 
+            end
+
+            local ang = mat:GetAngles()
+            local pos = mat:GetTranslation()
+
+            ang:RotateAroundAxis(ang:Right(),detail.Ang[1])
+            ang:RotateAroundAxis(ang:Up(),detail.Ang[2])
+            ang:RotateAroundAxis(ang:Forward(),detail.Ang[3])
+
+            pos = pos + ang:Forward() * detail.Pos[1]
+            pos = pos + ang:Right() * detail.Pos[2]
+            pos = pos + ang:Up() * detail.Pos[3]
+
+            self.DetailsDraw[_]:SetPredictable(true)
+
+            self.DetailsDraw[_]:SetAngles(ang)
+            self.DetailsDraw[_]:SetPos(pos)
+        end
+    end
+end
+
+function SWEP:WorldModel_Holster_Transform(nomod)
+    local ply = self:GetOwner()
+
+    if self:GetNWBool("DontShow") then
+        if IsValid(self.worldModel) then
+            self.worldModel:SetNoDraw(true)
+            self.worldModel.NoRender = true
+        end
+        return
+    end
+
+    if !IsValid(ply) then
+        return
+    end
+
+    local ent = hg.GetCurrentCharacter(ply)
+
+    if !IsValid(ent) then
+        return
+    end
+
+    local index = ent:LookupBone(self.HolsterBone)
+
+    local mat = ent:GetBoneMatrix(index)
+
+    if !mat then
+        return
+    end
+
+    local Pos = mat:GetTranslation()
+    local Ang = mat:GetAngles()
+
+    Ang:RotateAroundAxis(Ang:Right(),self.HolsterAng[1])
+    Ang:RotateAroundAxis(Ang:Up(),self.HolsterAng[2])
+    Ang:RotateAroundAxis(Ang:Forward(),self.HolsterAng[3])
+
+    Pos = Pos + Ang:Forward() * self.HolsterPos[1]
+    Pos = Pos + Ang:Right() * self.HolsterPos[2]
+    Pos = Pos + Ang:Up() * self.HolsterPos[3]
+
+    local model = self.worldModel
+
+    if IsValid(model) and !nomod then
+        model.IsIcon = true
+
+        model:SetPos(Pos)
+        model:SetAngles(Ang)
+
+        model:SetRenderOrigin(Pos)
+        model:SetRenderAngles(Ang)
+
+        if IsValid(self:GetOwner()) then
+            model:SetParent(self:GetOwner())
+        end
+
+        model:DrawModel()
+
+        //ply.prev_wep_ang = Ang
+    end
+
+    return Pos,Ang
+end
+
+function SWEP:GetWM()
+    if IsValid(self.worldModel) then
+        return self.worldModel
+    else
+        self:CreateWorldModel()
+        return self.worldModel
+    end
+end
+
+function SWEP:GetRunAnim()
+    if self.PistolRun then
+        return true
+    else
+        return false
+    end
+end
+
+function SWEP:CreateWorldModel()
+    self.worldModel = ClientsideModel(self.WorldModelReal or self.WorldModel)
+
+    local wm = self.worldModel
+
+    wm.DontOptimise = true
+    if IsValid(self:GetOwner()) then
+        wm:SetParent(self:GetOwner())
+    end
+    //wm:SetPredictable(true)
+
+    self:CallOnRemove("zaebal_remove",function()
+        wm:Remove()
+    end)
+
+    table.insert(hg.csm,wm)
+end
+
+function SWEP:DrawWorldModel()
+    local ply = self:GetOwner()
+    
+    -- Применяем тряску viewmodel если включена
+    if CLIENT and self.vmshake then
+        self:Applyvmshake()
+    end
+
+    if !IsValid(ply) then
+        self:DrawModel()
+
+        if self.Skin then
+            self:SetSkin(self.Skin)
+        end
+
+        if self.Bodygroups then
+	        for k, v in ipairs(self.Bodygroups) do
+	            self:SetBodygroup(k, v)
+	        end
+	    end
+
+        return
+    else
+        if not IsValid(self.worldModel) then
+            self:CreateWorldModel()
+            return
+        end
+
+        self:WorldModel_Transform()
+
+        if IsValid(self.worldModel) then
+            //self.worldModel:DrawModel()
+        end
+
+        if self.Details and CLIENT then
+            //self:WorldModel_Details()
+        end
+    end
+end
+
+if CLIENT then
+    concommand.Add("wm_getbones",function(ply)
+        local self = ply:GetActiveWeapon()
+        if self.worldModel then
+            for boneID = 0, self.worldModel:GetBoneCount() - 1 do
+                local boneName = self.worldModel:GetBoneName(boneID)
+                print(boneName)
+            end
+        else
+            for boneID = 0, self:GetBoneCount() - 1 do
+                local boneName = self:GetBoneName(boneID)
+                print(boneName)
+            end
+        end
+    end)
+    
+    -- Получить список костей VIEWMODEL
+    concommand.Add("vm_getbones", function()
+        local vm = LocalPlayer():GetViewModel()
+        if not IsValid(vm) then
+            print("ViewModel not valid!")
+            return
+        end
+        print("=== ViewModel Bones ===")
+        for boneID = 0, vm:GetBoneCount() - 1 do
+            local boneName = vm:GetBoneName(boneID)
+            print(boneID .. ": " .. boneName)
+        end
+        print("=======================")
+    end)
+    
+    -- Получить список костей WORLDMODEL (для TPIK)
+    concommand.Add("wm_getbones_tpik", function()
+        local wep = LocalPlayer():GetActiveWeapon()
+        if not IsValid(wep) or not IsValid(wep.worldModel) then
+            print("Weapon or WorldModel not valid!")
+            return
+        end
+        print("=== WorldModel (TPIK) Bones ===")
+        for boneID = 0, wep.worldModel:GetBoneCount() - 1 do
+            local boneName = wep.worldModel:GetBoneName(boneID)
+            print(boneID .. ": " .. boneName)
+        end
+        print("=================================")
+    end)
+
+    concommand.Add("wm_getsequence",function(ply)
+        local self = ply:GetActiveWeapon()
+        if self.worldModel then
+            PrintTable(self.worldModel:GetSequenceList())
+        else
+            PrintTable(self:GetSequenceList())
+        end
+    end)
+
+    concommand.Add("wm_getbg",function(ply)
+        local self = hg.eyeTrace(ply,200).Entity
+
+        for _, bg in ipairs(self:GetBodyGroups()) do
+            print(_,bg)
+            PrintTable(bg)
+        end
+    end)
+
+    concommand.Add("wm_getmat",function(ply)
+        local self = hg.eyeTrace(ply,200).Entity
+
+        for _, bg in ipairs(self:GetMaterials()) do
+            print(bg)
+        end
+    end)
+
+    concommand.Add("wm_setbgs",function(ply,cmd,arg)
+        local self = hg.eyeTrace(ply,200).Entity
+
+        self:SetBodyGroups(arg[1])
+    end)
+end
